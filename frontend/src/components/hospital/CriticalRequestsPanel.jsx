@@ -1,6 +1,6 @@
 import React from 'react';
 import { Badge } from '../Badge';
-import { AlertCircle, Flame, ArrowRight, Stethoscope } from 'lucide-react';
+import { AlertCircle, Flame, ArrowRight, Stethoscope, CheckCircle2 } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 export default function CriticalRequestsPanel({ requests = [] }) {
