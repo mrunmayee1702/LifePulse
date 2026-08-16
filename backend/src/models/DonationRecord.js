@@ -7,6 +7,16 @@ const donationRecordSchema = new mongoose.Schema(
       ref: 'User',
       required: true,
     },
+    hospitalId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'HospitalProfile',
+      default: null,
+    },
+    bloodRequestId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'BloodRequest',
+      default: null,
+    },
     hospitalName: {
       type: String,
       required: true,
@@ -19,6 +29,7 @@ const donationRecordSchema = new mongoose.Schema(
     unitsDonated: {
       type: Number,
       default: 1,
+      min: 1,
     },
     donationDate: {
       type: Date,
@@ -47,5 +58,8 @@ const donationRecordSchema = new mongoose.Schema(
     timestamps: true,
   }
 );
+
+donationRecordSchema.index({ donor: 1, donationDate: -1 });
+donationRecordSchema.index({ bloodRequestId: 1, donor: 1 });
 
 module.exports = mongoose.model('DonationRecord', donationRecordSchema);

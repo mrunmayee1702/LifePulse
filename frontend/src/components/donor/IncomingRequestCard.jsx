@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useAuth } from '../../context/AuthContext';
 import { Button } from '../Button';
 import { donorService } from '../../services/donorService';
 import RadarPing from '../common/RadarPing';
@@ -12,19 +13,31 @@ import {
   HeartPulse,
   AlertTriangle,
   Flame,
+  ArrowRight,
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 export default function IncomingRequestCard({ request }) {
-  const [status, setStatus] = useState(request.consentStatus || 'NONE'); // NONE | ACCEPTED | DECLINED
+  const { user } = useAuth();
+  const [status, setStatus] = useState(request.consentStatus || 'NONE'); // NONE | ACCEPTED | DECLINED | FULFILLED
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+
+  const donorBloodGroup = user?.bloodGroup || 'A+';
+  const requestedBloodGroup = request.bloodGroup || 'A+';
+  const isExactMatch = donorBloodGroup.toUpperCase() === requestedBloodGroup.toUpperCase();
 
   const urgencyUpper = (request.urgency || '').toUpperCase();
   const isCriticalOnly = urgencyUpper === 'CRITICAL' || urgencyUpper === 'EMERGENCY';
   const isUrgent = urgencyUpper === 'URGENT';
 
-  const unitsNeeded = request.unitsNeeded || request.unitsRequired || 1;
+  const isPartialFulfillment = request.status === 'PARTIALLY_FULFILLED' || (request.unitsFulfilled > 0 && request.remainingUnits > 0);
+  const remainingUnits = request.remainingUnits !== undefined
+    ? request.remainingUnits
+    : Math.max((request.unitsRequired || 1) - (request.unitsFulfilled || 0), 1);
+  
+  const unitsRequired = request.unitsRequired || 1;
+  const unitsFulfilled = request.unitsFulfilled || 0;
   const hospitalName = request.hospitalName || 'Verified Medical Center';
 
   const locationText = typeof request.location === 'string'
@@ -68,6 +81,43 @@ export default function IncomingRequestCard({ request }) {
     }
   };
 
+  if (status === 'FULFILLED' || request.isFulfilledForDonor) {
+    return (
+      <div className="bg-emerald-50 border border-emerald-200 rounded-3xl p-6 shadow-xs relative">
+        <div className="flex items-start gap-4">
+          <div className="w-10 h-10 rounded-2xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-sm">
+            <CheckCircle2 className="w-6 h-6" />
+          </div>
+          <div className="flex-grow">
+            <div className="flex items-center gap-2 mb-1">
+              <span className="px-2.5 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider bg-emerald-100 text-emerald-800">
+                ✓ YOUR DONATION FULFILLED & RECORDED
+              </span>
+              <span className="text-xs font-bold text-emerald-700">Verified by Hospital</span>
+            </div>
+            <h4 className="text-base sm:text-lg font-extrabold text-emerald-950 mb-1">
+              Thank you! Donation received by {hospitalName}
+            </h4>
+            <p className="text-xs sm:text-sm text-emerald-800 leading-relaxed mb-2 font-medium">
+              The hospital confirmed receipt of your blood donation. This life-saving contribution is recorded in your Donation History.
+            </p>
+            <div className="flex flex-wrap items-center gap-3 mt-2">
+              <div className="text-xs text-emerald-800 font-semibold bg-emerald-100/80 px-3 py-1 rounded-xl">
+                {requestedBloodGroup} Blood • {locationText}
+              </div>
+              <a
+                href="/donor/history"
+                className="text-xs font-bold text-emerald-700 hover:text-emerald-900 underline"
+              >
+                View Donation History →
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (status === 'ACCEPTED') {
     return (
       <div className="bg-emerald-50/70 border border-emerald-200 rounded-3xl p-6 shadow-xs relative">
@@ -89,7 +139,7 @@ export default function IncomingRequestCard({ request }) {
               Your consent has been recorded. The hospital can now view your shared contact details for urgent coordination.
             </p>
             <div className="text-xs text-emerald-800 font-semibold bg-emerald-100/60 px-3 py-1 rounded-xl inline-block">
-              Request Details: {request.bloodGroup || 'A+'} Blood • {unitsNeeded} Unit(s) • {locationText}
+              Request Details: {requestedBloodGroup} Blood • {remainingUnits} Unit(s) Still Needed • {locationText}
             </div>
           </div>
         </div>
@@ -118,6 +168,8 @@ export default function IncomingRequestCard({ request }) {
           ? 'border-rose-300/90 ring-1 ring-rose-100 shadow-[0_4px_20px_rgba(225,29,72,0.08)]'
           : isUrgent
           ? 'border-amber-200/90 bg-amber-50/20'
+          : isPartialFulfillment
+          ? 'border-amber-300/80 bg-amber-50/10'
           : 'border-slate-200/80'
       }`}
     >
@@ -145,6 +197,13 @@ export default function IncomingRequestCard({ request }) {
                 </RadarPing>
                 <span className="px-2.5 py-0.5 rounded-full text-xs font-bold tracking-wider uppercase bg-rose-100 text-brand-red border border-rose-200 shadow-2xs">
                   CRITICAL EMERGENCY
+                </span>
+              </div>
+            ) : isPartialFulfillment ? (
+              <div className="flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-amber-500 inline-block animate-ping" />
+                <span className="px-2.5 py-0.5 rounded-full text-xs font-bold tracking-wider uppercase bg-amber-100 text-amber-900 border border-amber-300">
+                  🟠 PARTIALLY FULFILLED ({unitsFulfilled}/{unitsRequired})
                 </span>
               </div>
             ) : isUrgent ? (
@@ -177,28 +236,49 @@ export default function IncomingRequestCard({ request }) {
           </div>
         </div>
 
-        {/* Center Column: Blood Group & Units Needed */}
+        {/* Center Column: Blood Group Needed & Donor Compatibility Badge */}
         <div className="md:col-span-4 border-y md:border-y-0 md:border-x border-slate-100 py-3 md:py-0 md:px-6 grid grid-cols-2 gap-4">
           <div>
             <span className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">
-              Blood Group
+              Blood Needed
             </span>
             <div className="text-2xl sm:text-3xl font-extrabold text-brand-navy">
-              {request.bloodGroup || 'A+'}
+              {requestedBloodGroup}
             </div>
-            <div className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-600 mt-1">
-              <span>You're a Match!</span>
-              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-            </div>
+
+            {/* Clear Compatibility Badge & Relationship */}
+            {isExactMatch ? (
+              <div className="inline-flex items-center gap-1 text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-lg mt-1.5 shadow-2xs">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                <span>Exact Match ({donorBloodGroup})</span>
+              </div>
+            ) : (
+              <div className="mt-1.5 space-y-0.5">
+                <div className="inline-flex items-center gap-1 text-xs font-bold text-blue-700 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-lg shadow-2xs">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                  <span>Compatible Donor</span>
+                </div>
+                <div className="text-[11px] font-semibold text-slate-500 flex items-center gap-1">
+                  <span>{donorBloodGroup} donor</span>
+                  <ArrowRight className="w-3 h-3 text-slate-400 shrink-0" />
+                  <span>{requestedBloodGroup} recipient</span>
+                </div>
+              </div>
+            )}
           </div>
 
           <div>
             <span className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">
-              Units Needed
+              {isPartialFulfillment ? 'Still Needed' : 'Units Needed'}
             </span>
             <div className="text-xl sm:text-2xl font-extrabold text-brand-navy">
-              {unitsNeeded} Unit{unitsNeeded > 1 ? 's' : ''}
+              {remainingUnits} Unit{remainingUnits > 1 ? 's' : ''}
             </div>
+            {isPartialFulfillment && (
+              <span className="text-[11px] font-bold text-amber-700 block mt-0.5">
+                ({unitsFulfilled} received of {unitsRequired} required)
+              </span>
+            )}
           </div>
         </div>
 

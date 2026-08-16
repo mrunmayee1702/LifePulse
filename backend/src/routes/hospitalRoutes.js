@@ -7,6 +7,9 @@ const {
   getBloodRequests,
   getBloodRequestById,
   getBloodRequestMatches,
+  getAvailableDonors,
+  getAcceptedDonors,
+  recordFulfillment,
   updateBloodRequest,
   cancelBloodRequest,
 } = require('../controllers/hospitalController');
@@ -23,8 +26,11 @@ router.put('/profile', updateProfile);
 
 router.post('/requests', createBloodRequest);
 router.get('/requests', getBloodRequests);
+router.get('/available-donors', getAvailableDonors);
+router.get('/accepted-donors', getAcceptedDonors);
 router.get('/requests/:id', getBloodRequestById);
 router.get('/requests/:id/matches', getBloodRequestMatches);
+router.post('/requests/:id/fulfill', recordFulfillment);
 router.patch('/requests/:id', updateBloodRequest);
 router.delete('/requests/:id', cancelBloodRequest);
 

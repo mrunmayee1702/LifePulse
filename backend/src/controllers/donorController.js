@@ -231,13 +231,9 @@ const getIncomingRequests = async (req, res) => {
       });
     }
 
-    // 2. Query open / partially fulfilled requests whose requiredDate is valid (>= start of today)
-    const startOfToday = new Date();
-    startOfToday.setHours(0, 0, 0, 0);
-
+    // 2. Query ALL open or partially fulfilled requests where remainingUnits > 0
     const openRequests = await BloodRequest.find({
       status: { $in: ['OPEN', 'PARTIALLY_FULFILLED'] },
-      requiredDate: { $gte: startOfToday },
     })
       .populate({
         path: 'hospitalId',
@@ -245,11 +241,22 @@ const getIncomingRequests = async (req, res) => {
       })
       .sort({ createdAt: -1 });
 
-    // Fetch all existing consent records for this donor
+    // Fetch all existing consent records for THIS SPECIFIC logged-in donor
     const donorConsents = await DonorConsent.find({ donorId: req.user._id });
     const consentStatusMap = new Map();
     donorConsents.forEach((c) => {
-      consentStatusMap.set(c.bloodRequestId.toString(), c.status);
+      if (c.bloodRequestId) {
+        consentStatusMap.set(c.bloodRequestId.toString(), c.status);
+      }
+    });
+
+    // Fetch existing donation records for THIS SPECIFIC logged-in donor
+    const donorDonations = await DonationRecord.find({ donor: req.user._id });
+    const donorFulfillmentMap = new Map();
+    donorDonations.forEach((dr) => {
+      if (dr.bloodRequestId) {
+        donorFulfillmentMap.set(dr.bloodRequestId.toString(), dr);
+      }
     });
 
     const donorCoords = profile.locationCoordinates || null;
@@ -257,6 +264,11 @@ const getIncomingRequests = async (req, res) => {
 
     // 3. Stage 5 Eligibility & Compatibility Evaluation across ALL candidates
     for (const reqDoc of openRequests) {
+      // Exclude if request is already fully fulfilled (safety check)
+      if (reqDoc.unitsFulfilled >= reqDoc.unitsRequired) {
+        continue;
+      }
+
       if (!isBloodCompatible(donorGroup, reqDoc.bloodGroup)) {
         continue;
       }
@@ -265,25 +277,45 @@ const getIncomingRequests = async (req, res) => {
       const hospCoords = hospProfile?.locationCoordinates || null;
       const approxDistanceKm = calculateDistanceKm(hospCoords, donorCoords);
 
-      if (approxDistanceKm !== null && profile.preferredRadiusKm && approxDistanceKm > profile.preferredRadiusKm) {
+      // Distance filtering: Only exclude if explicitly set radius < 50 km and distance is calculated
+      if (
+        approxDistanceKm !== null &&
+        profile.preferredRadiusKm &&
+        profile.preferredRadiusKm < 50 &&
+        approxDistanceKm > profile.preferredRadiusKm
+      ) {
         continue;
       }
 
-      const unitsNeeded = Math.max(reqDoc.unitsRequired - reqDoc.unitsFulfilled, 1);
+      const unitsRequired = reqDoc.unitsRequired;
+      const unitsFulfilled = reqDoc.unitsFulfilled;
+      const remainingUnits = Math.max(unitsRequired - unitsFulfilled, 0);
+      const unitsNeeded = remainingUnits > 0 ? remainingUnits : 1;
       const cityState = reqDoc.location?.city ? `${reqDoc.location.city}, ${reqDoc.location.state || ''}` : 'Local Area';
-      const existingConsentStatus = consentStatusMap.get(reqDoc._id.toString()) || 'NONE';
+
+      const isFulfilledForThisDonor = donorFulfillmentMap.has(reqDoc._id.toString());
+      let existingConsentStatus = consentStatusMap.get(reqDoc._id.toString()) || 'NONE';
+
+      if (isFulfilledForThisDonor) {
+        existingConsentStatus = 'FULFILLED';
+      }
 
       compatibleRequests.push({
         id: reqDoc._id.toString(),
         hospitalName: reqDoc.hospitalName || hospProfile?.hospitalName || 'Verified Healthcare Institution',
         urgency: reqDoc.urgency,
         bloodGroup: reqDoc.bloodGroup,
+        unitsRequired,
+        unitsFulfilled,
+        remainingUnits,
         unitsNeeded,
+        status: reqDoc.status, // OPEN or PARTIALLY_FULFILLED
         distanceKm: approxDistanceKm,
         postedTimeAgo: getRelativeTime(reqDoc.createdAt),
         locationAddress: cityState,
         consentStatus: existingConsentStatus,
-        contactUnlocked: existingConsentStatus === 'ACCEPTED',
+        isFulfilledForDonor: isFulfilledForThisDonor,
+        contactUnlocked: existingConsentStatus === 'ACCEPTED' || existingConsentStatus === 'FULFILLED',
         notes: reqDoc.reason,
         requiredDate: reqDoc.requiredDate,
         createdAt: reqDoc.createdAt,
@@ -381,11 +413,19 @@ const acceptRequest = async (req, res) => {
     if (!requestDoc) {
       return sendError(res, 404, 'Blood request not found.', 'REQUEST_NOT_FOUND');
     }
-    if (requestDoc.status === 'FULFILLED' || requestDoc.status === 'CANCELLED') {
+    if (requestDoc.status === 'FULFILLED' || requestDoc.unitsFulfilled >= requestDoc.unitsRequired) {
       return sendError(
         res,
         400,
-        `Cannot accept a ${requestDoc.status.toLowerCase()} blood request.`,
+        'This blood request is already fully fulfilled.',
+        'INVALID_REQUEST_STATUS'
+      );
+    }
+    if (requestDoc.status === 'CANCELLED') {
+      return sendError(
+        res,
+        400,
+        'Cannot accept a cancelled blood request.',
         'INVALID_REQUEST_STATUS'
       );
     }

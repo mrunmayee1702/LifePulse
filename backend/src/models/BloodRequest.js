@@ -66,6 +66,10 @@ const bloodRequestSchema = new mongoose.Schema(
       enum: REQUEST_STATUSES,
       default: 'OPEN',
     },
+    fulfilledAt: {
+      type: Date,
+      default: null,
+    },
   },
   {
     timestamps: true,
@@ -81,10 +85,15 @@ bloodRequestSchema.pre('save', function (next) {
   if (this.status !== 'CANCELLED') {
     if (this.unitsFulfilled >= this.unitsRequired) {
       this.status = 'FULFILLED';
+      if (!this.fulfilledAt) {
+        this.fulfilledAt = new Date();
+      }
     } else if (this.unitsFulfilled > 0 && this.unitsFulfilled < this.unitsRequired) {
       this.status = 'PARTIALLY_FULFILLED';
+      this.fulfilledAt = null;
     } else if (this.unitsFulfilled === 0) {
       this.status = 'OPEN';
+      this.fulfilledAt = null;
     }
   }
   next();

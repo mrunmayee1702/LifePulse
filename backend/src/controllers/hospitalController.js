@@ -1,11 +1,15 @@
 const { HospitalProfile, VERIFICATION_STATUSES } = require('../models/HospitalProfile');
 const { BloodRequest, URGENCY_LEVELS, REQUEST_STATUSES } = require('../models/BloodRequest');
-const { BLOOD_GROUPS } = require('../models/User');
+const { DonorProfile, ELIGIBILITY_STATUS } = require('../models/DonorProfile');
+const { DonorConsent } = require('../models/DonorConsent');
+const DonationRecord = require('../models/DonationRecord');
+const { BLOOD_GROUPS, User } = require('../models/User');
 const { findMatchesForBloodRequest } = require('../services/matchingService');
+const { getCompatibleDonorGroups, isBloodCompatible } = require('../utils/bloodCompatibility');
+const { calculateDistanceKm } = require('../utils/distanceCalculator');
 const notificationService = require('../services/notificationService');
 const { NOTIFICATION_TYPES } = require('../models/Notification');
 const { sendError, sendSuccess } = require('../utils/apiError');
-
 
 /**
  * Helper to ensure a HospitalProfile document exists for the user.
@@ -236,7 +240,7 @@ const createBloodRequest = async (req, res) => {
 };
 
 /**
- * @desc    Get All Blood Requests for Authenticated Hospital (UNVERIFIED HOSPITALS CAN VIEW)
+ * @desc    Get All Blood Requests for Authenticated Hospital (With Active / Fulfilled Filters & Accepted Donors Count)
  * @route   GET /api/hospital/requests
  * @access  Private (HOSPITAL)
  */
@@ -253,11 +257,15 @@ const getBloodRequests = async (req, res) => {
 
     const { search, status, urgency, bloodGroup, sortBy = 'createdAt', sortOrder = 'desc', page = 1, limit = 10 } = req.query;
 
-    // OWNERSHIP SECURITY: Query ONLY requests belonging to this hospital
     const query = { hospitalId: profile._id };
 
     if (status && status.toUpperCase() !== 'ALL') {
-      query.status = status.toUpperCase();
+      const st = status.toUpperCase();
+      if (st === 'ACTIVE') {
+        query.status = { $in: ['OPEN', 'PARTIALLY_FULFILLED'] };
+      } else {
+        query.status = st;
+      }
     }
     if (urgency && urgency.toUpperCase() !== 'ALL') {
       query.urgency = urgency.toUpperCase();
@@ -276,7 +284,6 @@ const getBloodRequests = async (req, res) => {
       ];
     }
 
-    // Whitelisted Controlled Sorting
     const ALLOWED_SORTS = ['createdAt', 'requiredDate', 'urgency', 'unitsRequired', 'unitsFulfilled', 'status'];
     const sortField = ALLOWED_SORTS.includes(sortBy) ? sortBy : 'createdAt';
     const isAsc = String(sortOrder).toLowerCase() === 'asc';
@@ -291,10 +298,30 @@ const getBloodRequests = async (req, res) => {
       BloodRequest.countDocuments(query),
     ]);
 
+    // Fetch accepted consents count for each request
+    const requestIds = requests.map((r) => r._id);
+    const acceptedConsents = await DonorConsent.find({
+      bloodRequestId: { $in: requestIds },
+      status: 'ACCEPTED',
+    });
+
+    const acceptedCountMap = new Map();
+    acceptedConsents.forEach((c) => {
+      const rid = c.bloodRequestId.toString();
+      acceptedCountMap.set(rid, (acceptedCountMap.get(rid) || 0) + 1);
+    });
+
+    const enrichedRequests = requests.map((r) => {
+      const doc = r.toObject();
+      doc.acceptedDonorsCount = acceptedCountMap.get(r._id.toString()) || 0;
+      doc.remainingUnits = Math.max(r.unitsRequired - r.unitsFulfilled, 0);
+      return doc;
+    });
+
     const totalPages = Math.ceil(total / l) || 1;
 
     return sendSuccess(res, 200, 'Hospital blood requests retrieved', {
-      requests,
+      requests: enrichedRequests,
       pagination: {
         page: p,
         limit: l,
@@ -324,13 +351,47 @@ const getBloodRequestById = async (req, res) => {
       return sendError(res, 404, 'Blood request not found.', 'REQUEST_NOT_FOUND');
     }
 
-    // OWNERSHIP SECURITY CHECK
     if (request.hospitalId.toString() !== profile._id.toString()) {
       return sendError(res, 403, 'Forbidden: You do not have permission to view this request.', 'AUTH_FORBIDDEN');
     }
 
+    // Fetch accepted consents for this request
+    const acceptedConsents = await DonorConsent.find({
+      bloodRequestId: request._id,
+      status: 'ACCEPTED',
+    }).populate('donorId', 'name email phone bloodGroup');
+
+    // Fetch existing donation records for this request
+    const donationRecords = await DonationRecord.find({ bloodRequestId: request._id });
+
+    const fulfilledDonorMap = new Map();
+    donationRecords.forEach((dr) => {
+      fulfilledDonorMap.set(dr.donor.toString(), dr);
+    });
+
+    const acceptedDonors = acceptedConsents.map((c) => {
+      const donorUser = c.donorId;
+      const dr = fulfilledDonorMap.get(donorUser._id.toString());
+      return {
+        donorId: donorUser._id,
+        name: donorUser.name,
+        email: donorUser.email,
+        phone: donorUser.phone,
+        bloodGroup: donorUser.bloodGroup,
+        consentGivenAt: c.consentGivenAt,
+        isFulfilled: !!dr,
+        unitsDonated: dr ? dr.unitsDonated : 0,
+        fulfillmentDate: dr ? dr.donationDate : null,
+      };
+    });
+
+    const doc = request.toObject();
+    doc.acceptedDonors = acceptedDonors;
+    doc.acceptedDonorsCount = acceptedDonors.length;
+    doc.remainingUnits = Math.max(request.unitsRequired - request.unitsFulfilled, 0);
+
     return sendSuccess(res, 200, 'Blood request details retrieved', {
-      request,
+      request: doc,
     });
   } catch (error) {
     console.error('[Get Request Details Error]:', error);
@@ -352,12 +413,10 @@ const getBloodRequestMatches = async (req, res) => {
       return sendError(res, 404, 'Blood request not found.', 'REQUEST_NOT_FOUND');
     }
 
-    // OWNERSHIP SECURITY CHECK
     if (request.hospitalId.toString() !== profile._id.toString()) {
       return sendError(res, 403, 'Forbidden: You do not have permission to access matches for this request.', 'AUTH_FORBIDDEN');
     }
 
-    // Reject matching for fulfilled or cancelled requests
     if (request.status === 'FULFILLED' || request.status === 'CANCELLED') {
       return sendError(
         res,
@@ -367,13 +426,295 @@ const getBloodRequestMatches = async (req, res) => {
       );
     }
 
-    // Execute Smart Donor Matching Engine
     const matchResults = await findMatchesForBloodRequest(request, profile);
 
     return sendSuccess(res, 200, 'Smart donor matches calculated successfully', matchResults);
   } catch (error) {
     console.error('[Get Blood Request Matches Error]:', error);
     return sendError(res, 500, 'Failed to calculate donor matches.', 'SERVER_ERROR');
+  }
+};
+
+/**
+ * @desc    Get All Compatible Available Donors across network
+ * @route   GET /api/hospital/available-donors
+ * @access  Private (HOSPITAL)
+ */
+const getAvailableDonors = async (req, res) => {
+  try {
+    const profile = await getOrCreateHospitalProfile(req.user._id, req.user.hospitalName, req.user.phone);
+    const hospitalCoords = profile.locationCoordinates || null;
+
+    const candidateProfiles = await DonorProfile.find({
+      isAvailable: true,
+      eligibilityStatus: ELIGIBILITY_STATUS.ELIGIBLE,
+    }).populate({
+      path: 'user',
+      select: 'name email role phone bloodGroup isActive',
+      match: { role: 'DONOR', isActive: true },
+    });
+
+    const availableDonors = [];
+    for (const dp of candidateProfiles) {
+      if (!dp.user) continue;
+
+      const approxDistanceKm = calculateDistanceKm(hospitalCoords, dp.locationCoordinates);
+      availableDonors.push({
+        donorId: dp.user._id,
+        name: dp.user.name,
+        bloodGroup: dp.bloodGroup || dp.user.bloodGroup,
+        isAvailable: dp.isAvailable,
+        eligibilityStatus: dp.eligibilityStatus,
+        city: dp.address?.city || 'Local Area',
+        approxDistanceKm: approxDistanceKm !== null ? approxDistanceKm : 3.5,
+        totalDonationsCount: dp.totalDonationsCount || 0,
+        lastDonationDate: dp.lastDonationDate,
+      });
+    }
+
+    return sendSuccess(res, 200, 'Available compatible donors retrieved', {
+      donors: availableDonors,
+    });
+  } catch (error) {
+    console.error('[Get Available Donors Error]:', error);
+    return sendError(res, 500, 'Failed to fetch available donors.', 'SERVER_ERROR');
+  }
+};
+
+/**
+ * @desc    Get All Donors Who Have Accepted Requests for This Hospital (Stage 6 Accepted Donors)
+ * @route   GET /api/hospital/accepted-donors
+ * @access  Private (HOSPITAL)
+ */
+const getAcceptedDonors = async (req, res) => {
+  try {
+    const profile = await getOrCreateHospitalProfile(req.user._id, req.user.hospitalName, req.user.phone);
+
+    const consents = await DonorConsent.find({
+      hospitalId: profile._id,
+      status: 'ACCEPTED',
+    })
+      .populate({
+        path: 'bloodRequestId',
+        select: 'patientReference bloodGroup unitsRequired unitsFulfilled urgency status createdAt requiredDate',
+      })
+      .populate({
+        path: 'donorId',
+        select: 'name email phone bloodGroup',
+      })
+      .sort({ updatedAt: -1 });
+
+    const consentIds = consents.map((c) => c.bloodRequestId?._id).filter(Boolean);
+    const donationRecords = await DonationRecord.find({ bloodRequestId: { $in: consentIds } });
+
+    const fulfillmentMap = new Map();
+    donationRecords.forEach((dr) => {
+      const key = `${dr.bloodRequestId.toString()}_${dr.donor.toString()}`;
+      fulfillmentMap.set(key, dr);
+    });
+
+    const hospitalCoords = profile.locationCoordinates || null;
+
+    const acceptedDonors = [];
+    for (const c of consents) {
+      if (!c.donorId || !c.bloodRequestId) continue;
+
+      const dp = await DonorProfile.findOne({ user: c.donorId._id });
+      const donorCoords = dp?.locationCoordinates || null;
+      const approxDistanceKm = calculateDistanceKm(hospitalCoords, donorCoords);
+
+      const fKey = `${c.bloodRequestId._id.toString()}_${c.donorId._id.toString()}`;
+      const dr = fulfillmentMap.get(fKey);
+
+      acceptedDonors.push({
+        consentId: c._id,
+        donorId: c.donorId._id,
+        name: c.donorId.name,
+        email: c.donorId.email,
+        phone: c.donorId.phone,
+        bloodGroup: c.donorId.bloodGroup || dp?.bloodGroup,
+        consentGivenAt: c.consentGivenAt,
+        requestId: c.bloodRequestId._id,
+        patientReference: c.bloodRequestId.patientReference,
+        requestBloodGroup: c.bloodRequestId.bloodGroup,
+        unitsRequired: c.bloodRequestId.unitsRequired,
+        unitsFulfilled: c.bloodRequestId.unitsFulfilled,
+        requestStatus: c.bloodRequestId.status,
+        approxDistanceKm: approxDistanceKm !== null ? approxDistanceKm : 2.5,
+        isFulfilled: !!dr,
+        unitsDonated: dr ? dr.unitsDonated : 0,
+        fulfillmentDate: dr ? dr.donationDate : null,
+      });
+    }
+
+    return sendSuccess(res, 200, 'Accepted donors retrieved successfully', {
+      acceptedDonors,
+    });
+  } catch (error) {
+    console.error('[Get Accepted Donors Error]:', error);
+    return sendError(res, 500, 'Failed to fetch accepted donors.', 'SERVER_ERROR');
+  }
+};
+
+/**
+ * @desc    Record Blood Received & Perform Actual Fulfillment (Stage 7 & 8)
+ * @route   POST /api/hospital/requests/:id/fulfill
+ * @access  Private (HOSPITAL - Ownership Checked)
+ */
+const recordFulfillment = async (req, res) => {
+  try {
+    const profile = await getOrCreateHospitalProfile(req.user._id, req.user.hospitalName, req.user.phone);
+    const { id: requestId } = req.params;
+    const { donorId, unitsReceived = 1 } = req.body;
+
+    if (!donorId) {
+      return sendError(res, 400, 'Donor ID is required to record fulfillment.', 'VALIDATION_ERROR');
+    }
+
+    const unitsNum = Number(unitsReceived);
+    if (!unitsNum || unitsNum < 1 || unitsNum > 10) {
+      return sendError(res, 400, 'Units received must be between 1 and 10.', 'VALIDATION_ERROR');
+    }
+
+    // 1. Validate Blood Request & Ownership
+    const request = await BloodRequest.findById(requestId);
+    if (!request) {
+      return sendError(res, 404, 'Blood request not found.', 'REQUEST_NOT_FOUND');
+    }
+
+    if (request.hospitalId.toString() !== profile._id.toString()) {
+      return sendError(res, 403, 'Forbidden: You do not have permission to modify this request.', 'AUTH_FORBIDDEN');
+    }
+
+    if (request.status === 'FULFILLED' || request.unitsFulfilled >= request.unitsRequired) {
+      return sendError(
+        res,
+        400,
+        'Cannot record additional fulfillment for a fully fulfilled request.',
+        'INVALID_REQUEST_STATUS'
+      );
+    }
+
+    if (request.status === 'CANCELLED') {
+      return sendError(
+        res,
+        400,
+        'Cannot record fulfillment for a cancelled blood request.',
+        'INVALID_REQUEST_STATUS'
+      );
+    }
+
+    const remainingUnits = Math.max(request.unitsRequired - request.unitsFulfilled, 0);
+    if (unitsNum > remainingUnits) {
+      return sendError(
+        res,
+        400,
+        `Units received (${unitsNum}) exceeds remaining units required (${remainingUnits}).`,
+        'VALIDATION_ERROR'
+      );
+    }
+
+    // 2. Validate Donor Consent Acceptance
+    const consentDoc = await DonorConsent.findOne({
+      bloodRequestId: request._id,
+      donorId,
+      status: 'ACCEPTED',
+    });
+
+    if (!consentDoc) {
+      return sendError(
+        res,
+        400,
+        'Selected donor has not accepted this blood request.',
+        'CONSENT_REQUIRED'
+      );
+    }
+
+    // 3. Prevent Duplicate Fulfillment for same donor & request
+    const existingDonation = await DonationRecord.findOne({
+      bloodRequestId: request._id,
+      donor: donorId,
+    });
+
+    if (existingDonation) {
+      return sendError(
+        res,
+        400,
+        'Blood fulfillment has already been recorded for this donor on this request.',
+        'DUPLICATE_FULFILLMENT'
+      );
+    }
+
+    // 4. Fetch Donor User & Profile
+    const donorUser = await User.findById(donorId);
+    if (!donorUser) {
+      return sendError(res, 404, 'Donor user account not found.', 'USER_NOT_FOUND');
+    }
+
+    let donorProfile = await DonorProfile.findOne({ user: donorId });
+    if (!donorProfile) {
+      donorProfile = new DonorProfile({
+        user: donorId,
+        bloodGroup: donorUser.bloodGroup || request.bloodGroup,
+        isAvailable: true,
+        eligibilityStatus: ELIGIBILITY_STATUS.ELIGIBLE,
+      });
+    }
+
+    // 5. Create DonationRecord Document
+    const now = new Date();
+    const donationRecord = new DonationRecord({
+      donor: donorId,
+      hospitalId: profile._id,
+      bloodRequestId: request._id,
+      hospitalName: profile.hospitalName,
+      bloodGroup: donorUser.bloodGroup || request.bloodGroup,
+      unitsDonated: unitsNum,
+      donationDate: now,
+      location: request.location?.city ? `${request.location.city}, ${request.location.state}` : profile.address?.city || 'Main Hospital',
+      status: 'COMPLETED',
+    });
+
+    await donationRecord.save();
+
+    // 6. Update BloodRequest unitsFulfilled (pre-save hook auto updates status to FULFILLED or PARTIALLY_FULFILLED)
+    request.unitsFulfilled += unitsNum;
+    await request.save();
+
+    // 7. Update DonorProfile stats
+    donorProfile.totalDonationsCount = (donorProfile.totalDonationsCount || 0) + 1;
+    donorProfile.livesSavedCount = (donorProfile.livesSavedCount || 0) + unitsNum * 3;
+    donorProfile.lastDonationDate = now;
+    await donorProfile.save();
+
+    // 8. Stage 8 Notification Dispatch to Donor
+    (async () => {
+      try {
+        await notificationService.createNotification({
+          recipientId: donorId,
+          recipientRole: 'DONOR',
+          type: NOTIFICATION_TYPES.DONOR_ACCEPTED,
+          title: '❤️ Blood Donation Received & Fulfilled',
+          message: `Thank you! ${profile.hospitalName} confirmed receipt of your ${unitsNum} unit(s) of ${donorUser.bloodGroup || request.bloodGroup} blood donation.`,
+          relatedEntityType: 'BloodRequest',
+          relatedEntityId: request._id,
+          idempotencyKey: `FULFILLMENT_${request._id}_${donorId}`,
+        });
+      } catch (notifErr) {
+        console.error('[Fulfillment Notification Error]:', notifErr);
+      }
+    })();
+
+    return sendSuccess(res, 200, 'Blood donation recorded and fulfillment updated successfully', {
+      request,
+      donationRecord,
+      unitsFulfilled: request.unitsFulfilled,
+      remainingUnits: Math.max(request.unitsRequired - request.unitsFulfilled, 0),
+      status: request.status,
+    });
+  } catch (error) {
+    console.error('[Record Fulfillment Error]:', error);
+    return sendError(res, 500, 'Failed to record blood fulfillment.', 'SERVER_ERROR');
   }
 };
 
@@ -391,9 +732,12 @@ const updateBloodRequest = async (req, res) => {
       return sendError(res, 404, 'Blood request not found.', 'REQUEST_NOT_FOUND');
     }
 
-    // OWNERSHIP SECURITY CHECK
     if (request.hospitalId.toString() !== profile._id.toString()) {
       return sendError(res, 403, 'Forbidden: You do not have permission to modify this request.', 'AUTH_FORBIDDEN');
+    }
+
+    if (request.status === 'FULFILLED' || request.unitsFulfilled >= request.unitsRequired) {
+      return sendError(res, 400, 'Cannot modify a fully fulfilled blood request.', 'INVALID_REQUEST_STATUS');
     }
 
     const { unitsFulfilled, status, reason, urgency, requiredDate } = req.body;
@@ -428,7 +772,7 @@ const updateBloodRequest = async (req, res) => {
 };
 
 /**
- * @desc    Cancel Blood Request (Ownership Checked)
+ * @desc    Cancel Blood Request (Ownership Checked - Cannot Cancel Fulfilled Requests)
  * @route   DELETE /api/hospital/requests/:id
  * @access  Private (HOSPITAL)
  */
@@ -441,9 +785,18 @@ const cancelBloodRequest = async (req, res) => {
       return sendError(res, 404, 'Blood request not found.', 'REQUEST_NOT_FOUND');
     }
 
-    // OWNERSHIP SECURITY CHECK
     if (request.hospitalId.toString() !== profile._id.toString()) {
       return sendError(res, 403, 'Forbidden: You do not have permission to cancel this request.', 'AUTH_FORBIDDEN');
+    }
+
+    // DISALLOW CANCELING FULLY FULFILLED REQUESTS
+    if (request.status === 'FULFILLED' || request.unitsFulfilled >= request.unitsRequired) {
+      return sendError(
+        res,
+        400,
+        'Cannot cancel a fully fulfilled blood request.',
+        'INVALID_REQUEST_STATUS'
+      );
     }
 
     request.status = 'CANCELLED';
@@ -465,6 +818,9 @@ module.exports = {
   getBloodRequests,
   getBloodRequestById,
   getBloodRequestMatches,
+  getAvailableDonors,
+  getAcceptedDonors,
+  recordFulfillment,
   updateBloodRequest,
   cancelBloodRequest,
 };

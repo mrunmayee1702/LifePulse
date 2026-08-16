@@ -73,6 +73,30 @@ export const hospitalService = {
   },
 
   /**
+   * Get Available Donors Across Network
+   */
+  async getAvailableDonors() {
+    const response = await fetch(`${API_BASE_URL}/hospital/available-donors`, {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+    });
+    return handleResponse(response);
+  },
+
+  /**
+   * Get Accepted Donors for this Hospital
+   */
+  async getAcceptedDonors() {
+    const response = await fetch(`${API_BASE_URL}/hospital/accepted-donors`, {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+    });
+    return handleResponse(response);
+  },
+
+  /**
    * Get Details for a Specific Blood Request
    */
   async getBloodRequest(id) {
@@ -92,6 +116,19 @@ export const hospitalService = {
       method: 'GET',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
+    });
+    return handleResponse(response);
+  },
+
+  /**
+   * Record Actual Blood Received & Perform Fulfillment
+   */
+  async recordFulfillment(requestId, fulfillmentData) {
+    const response = await fetch(`${API_BASE_URL}/hospital/requests/${requestId}/fulfill`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(fulfillmentData),
     });
     return handleResponse(response);
   },

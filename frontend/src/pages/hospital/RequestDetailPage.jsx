@@ -3,6 +3,7 @@ import { useAuth } from '../../context/AuthContext';
 import { hospitalService } from '../../services/hospitalService';
 import HospitalHeader from '../../components/hospital/HospitalHeader';
 import DonorMatchCard from '../../components/hospital/DonorMatchCard';
+import RecordFulfillmentModal from '../../components/hospital/RecordFulfillmentModal';
 import Container from '../../components/Container';
 import Card from '../../components/Card';
 import Footer from '../../components/Footer';
@@ -24,6 +25,9 @@ import {
   Lock,
   UserCheck,
   Info,
+  Phone,
+  Mail,
+  CheckSquare,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -34,7 +38,8 @@ export default function RequestDetailPage() {
   const [profile, setProfile] = useState(null);
   const [request, setRequest] = useState(null);
   const [matchData, setMatchData] = useState(null);
-  const [unitsInput, setUnitsInput] = useState(0);
+  const [isFulfillmentModalOpen, setIsFulfillmentModalOpen] = useState(false);
+
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingMatches, setIsLoadingMatches] = useState(true);
   const [isUpdating, setIsUpdating] = useState(false);
@@ -53,7 +58,6 @@ export default function RequestDetailPage() {
       if (profileRes.success) setProfile(profileRes.data.profile);
       if (requestRes.success) {
         setRequest(requestRes.data.request);
-        setUnitsInput(requestRes.data.request.unitsFulfilled);
       }
     } catch (err) {
       console.error('[Load Request Detail Error]:', err);
@@ -84,36 +88,26 @@ export default function RequestDetailPage() {
     }
   }, [requestId]);
 
-  // Update Units Fulfilled Handler
-  const handleUpdateFulfillment = async () => {
-    if (!request) return;
+  // Record Fulfillment Handler
+  const handleConfirmFulfillment = async (reqId, fulfillmentPayload) => {
     setErrorMsg('');
     setSuccessMsg('');
-
-    if (unitsInput < 0 || unitsInput > request.unitsRequired) {
-      setErrorMsg(`Units fulfilled must be between 0 and ${request.unitsRequired}.`);
-      return;
-    }
-
-    setIsUpdating(true);
-    try {
-      const res = await hospitalService.updateBloodRequest(request._id, {
-        unitsFulfilled: Number(unitsInput),
-      });
-      if (res.success) {
-        setRequest(res.data.request);
-        setSuccessMsg(`Fulfillment updated: ${res.data.request.unitsFulfilled} / ${res.data.request.unitsRequired} units (${res.data.request.status})`);
-        loadMatches(); // Refresh match candidates
-      }
-    } catch (err) {
-      setErrorMsg(err.message || 'Failed to update fulfillment status.');
-    } finally {
-      setIsUpdating(false);
+    const res = await hospitalService.recordFulfillment(reqId, fulfillmentPayload);
+    if (res.success) {
+      setSuccessMsg(`Blood donation received and fulfillment updated! (${res.data.unitsFulfilled} / ${res.data.request.unitsRequired} units)`);
+      loadData();
+      loadMatches();
     }
   };
 
-  // Cancel Request Handler
+  // Cancel Request Handler (Gated for non-fulfilled requests)
   const handleCancelRequest = async () => {
+    if (!request) return;
+    if (request.status === 'FULFILLED' || request.unitsFulfilled >= request.unitsRequired) {
+      setErrorMsg('Cannot cancel a fully fulfilled blood request.');
+      return;
+    }
+
     if (!window.confirm('Are you sure you want to cancel this blood request?')) return;
     setErrorMsg('');
     setSuccessMsg('');
@@ -133,20 +127,15 @@ export default function RequestDetailPage() {
     }
   };
 
-  const getStatusBadge = (status) => {
-    switch (status) {
-      case 'FULFILLED':
-        return <Badge variant="success">FULFILLED</Badge>;
-      case 'PARTIALLY_FULFILLED':
-        return <Badge variant="warning">PARTIALLY FULFILLED</Badge>;
-      case 'CANCELLED':
-        return <Badge variant="neutral">CANCELLED</Badge>;
-      default:
-        return <Badge variant="info">OPEN</Badge>;
-    }
-  };
-
-  const isMatchingAvailable = request?.status === 'OPEN' || request?.status === 'PARTIALLY_FULFILLED';
+  const isFulfilled = request?.status === 'FULFILLED' || (request?.unitsFulfilled >= request?.unitsRequired);
+  const isCancelled = request?.status === 'CANCELLED';
+  const remainingUnits = request ? Math.max(request.unitsRequired - request.unitsFulfilled, 0) : 0;
+  const acceptedDonors = request?.acceptedDonors || [];
+  const fulfillmentDateText = request?.fulfilledAt
+    ? new Date(request.fulfilledAt).toLocaleDateString()
+    : request?.updatedAt
+    ? new Date(request.updatedAt).toLocaleDateString()
+    : new Date().toLocaleDateString();
 
   return (
     <div className="min-h-screen bg-brand-bg text-brand-navy flex flex-col justify-between antialiased">
@@ -156,11 +145,11 @@ export default function RequestDetailPage() {
         <Container size="md">
           <div className="mb-6">
             <a
-              href="/hospital/dashboard"
+              href="/hospital/requests"
               className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-600 hover:text-brand-red transition-colors"
             >
               <ArrowLeft className="w-4 h-4" />
-              <span>Back to Dashboard</span>
+              <span>Back to Operations Directory</span>
             </a>
           </div>
 
@@ -174,10 +163,10 @@ export default function RequestDetailPage() {
               <AlertCircle className="w-8 h-8 mx-auto mb-2 text-rose-600" />
               <p className="font-bold mb-3">{errorMsg}</p>
               <a
-                href="/hospital/dashboard"
+                href="/hospital/requests"
                 className="px-4 py-2 bg-slate-800 text-white rounded-xl text-xs font-bold hover:bg-black transition-all inline-block"
               >
-                Return to Dashboard
+                Return to Directory
               </a>
             </div>
           ) : (
@@ -190,10 +179,43 @@ export default function RequestDetailPage() {
               )}
 
               {successMsg && (
-                <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center gap-2">
+                <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center gap-2 font-bold">
                   <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
                   <span>{successMsg}</span>
                 </div>
+              )}
+
+              {/* FULFILLED COMPLETION BANNER */}
+              {isFulfilled && (
+                <motion.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="p-6 rounded-3xl bg-emerald-500 text-white shadow-md flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+                >
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 rounded-2xl bg-white/20 flex items-center justify-center text-white shrink-0">
+                      <CheckCircle2 className="w-7 h-7" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2 mb-0.5">
+                        <span className="px-2.5 py-0.5 rounded-full text-xs font-extrabold bg-white/20 uppercase tracking-wider">
+                          ✓ REQUEST FULFILLED
+                        </span>
+                        <span className="text-xs font-bold text-emerald-100">Operation Completed</span>
+                      </div>
+                      <h2 className="text-xl font-black">
+                        {request.unitsRequired} / {request.unitsRequired} Units Received & Verified
+                      </h2>
+                      <p className="text-xs text-emerald-100 font-medium">
+                        Completed on {fulfillmentDateText} • All required units have been received from donors. No further action needed.
+                      </p>
+                    </div>
+                  </div>
+
+                  <span className="px-4 py-2 bg-white text-emerald-800 font-extrabold rounded-2xl text-xs shrink-0 text-center shadow-xs">
+                    FULFILLED & CLOSED
+                  </span>
+                </motion.div>
               )}
 
               {/* Main Request Information Card */}
@@ -201,7 +223,15 @@ export default function RequestDetailPage() {
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-6 mb-6">
                   <div>
                     <div className="flex items-center gap-2 mb-2 flex-wrap">
-                      {getStatusBadge(request.status)}
+                      {isFulfilled ? (
+                        <Badge variant="success">FULFILLED</Badge>
+                      ) : request.status === 'PARTIALLY_FULFILLED' ? (
+                        <Badge variant="warning">PARTIALLY FULFILLED</Badge>
+                      ) : isCancelled ? (
+                        <Badge variant="neutral">CANCELLED</Badge>
+                      ) : (
+                        <Badge variant="info">OPEN</Badge>
+                      )}
                       <Badge variant={request.urgency === 'CRITICAL' ? 'danger' : 'warning'}>
                         {request.urgency} URGENCY
                       </Badge>
@@ -218,18 +248,32 @@ export default function RequestDetailPage() {
                     </span>
                   </div>
 
-                  {request.status !== 'CANCELLED' && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={handleCancelRequest}
-                      disabled={isUpdating}
-                      className="text-rose-600 border-rose-200 hover:bg-rose-50"
-                      icon={XCircle}
-                    >
-                      Cancel Request
-                    </Button>
-                  )}
+                  {/* ACTION BUTTONS (NO CANCEL BUTTON IF FULFILLED) */}
+                  <div className="flex items-center gap-2">
+                    {!isFulfilled && !isCancelled && remainingUnits > 0 && (
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        onClick={() => setIsFulfillmentModalOpen(true)}
+                        className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                      >
+                        + Record Blood Received
+                      </Button>
+                    )}
+
+                    {!isFulfilled && !isCancelled && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleCancelRequest}
+                        disabled={isUpdating}
+                        className="text-rose-600 border-rose-200 hover:bg-rose-50"
+                        icon={XCircle}
+                      >
+                        Cancel Request
+                      </Button>
+                    )}
+                  </div>
                 </div>
 
                 {/* Grid Info Details */}
@@ -247,7 +291,7 @@ export default function RequestDetailPage() {
                   <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
                     <span className="block font-bold text-slate-400 mb-1">Remaining Units</span>
                     <span className="text-2xl font-black text-brand-red">
-                      {Math.max(request.unitsRequired - request.unitsFulfilled, 0)} Units
+                      {remainingUnits} Units
                     </span>
                   </div>
                 </div>
@@ -283,8 +327,70 @@ export default function RequestDetailPage() {
                 </div>
               </Card>
 
-              {/* SMART DONOR MATCHING SECTION (OPEN / PARTIALLY_FULFILLED ONLY) */}
-              {isMatchingAvailable ? (
+              {/* ACCEPTED DONORS FOR THIS REQUEST */}
+              <Card variant="elevated" className="p-8 border border-slate-200">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-4 mb-6">
+                  <div>
+                    <h2 className="text-xl font-extrabold text-brand-navy flex items-center gap-2">
+                      <ShieldCheck className="w-5 h-5 text-emerald-600" />
+                      <span>Accepted Donors ({acceptedDonors.length})</span>
+                    </h2>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Donors who explicitly accepted this request and granted contact consent.
+                    </p>
+                  </div>
+                </div>
+
+                {acceptedDonors.length === 0 ? (
+                  <div className="p-6 bg-slate-50 rounded-2xl text-center border border-slate-100">
+                    <UserCheck className="w-8 h-8 text-slate-400 mx-auto mb-2" />
+                    <p className="text-xs font-bold text-slate-600">No donor acceptances recorded yet for this request.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {acceptedDonors.map((ad) => (
+                      <div
+                        key={ad.donorId}
+                        className="p-4 rounded-2xl bg-slate-50 border border-slate-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-4 text-xs"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-2xl bg-emerald-100 text-emerald-800 font-extrabold flex items-center justify-center text-sm shadow-2xs">
+                            {ad.bloodGroup}
+                          </div>
+                          <div>
+                            <strong className="text-base font-extrabold text-brand-navy block leading-tight">{ad.name}</strong>
+                            <div className="flex items-center gap-3 text-slate-500 mt-1">
+                              <span className="flex items-center gap-1 font-semibold text-slate-700">
+                                <Phone className="w-3 h-3 text-emerald-600" />
+                                {ad.phone}
+                              </span>
+                              <span className="flex items-center gap-1">
+                                <Mail className="w-3 h-3 text-slate-400" />
+                                {ad.email}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div>
+                          {ad.isFulfilled ? (
+                            <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                              ✓ {ad.unitsDonated} Unit Received ({new Date(ad.fulfillmentDate).toLocaleDateString()})
+                            </span>
+                          ) : (
+                            <span className="px-3 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-900 border border-amber-200">
+                              Accepted (Pending Reception)
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </Card>
+
+              {/* SMART DONOR MATCHES (ACTIVE REQUESTS ONLY) */}
+              {!isFulfilled && !isCancelled && (
                 <Card variant="elevated" className="p-8 border border-slate-200">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-6 mb-6">
                     <div>
@@ -310,15 +416,6 @@ export default function RequestDetailPage() {
                     </div>
                   </div>
 
-                  {/* Medical Disclaimer Banner */}
-                  {matchData?.medicalDisclaimer && (
-                    <div className="mb-6 p-4 rounded-xl bg-blue-50/80 border border-blue-200 text-blue-900 text-xs flex items-start gap-2.5">
-                      <ShieldCheck className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
-                      <span className="leading-relaxed">{matchData.medicalDisclaimer}</span>
-                    </div>
-                  )}
-
-                  {/* Match Results Feed */}
                   {isLoadingMatches ? (
                     <div className="py-12 text-center text-slate-500 text-xs flex flex-col items-center gap-2">
                       <RefreshCw className="w-6 h-6 text-brand-red animate-spin" />
@@ -326,86 +423,49 @@ export default function RequestDetailPage() {
                     </div>
                   ) : !matchData || matchData.matches?.length === 0 ? (
                     <div className="p-8 bg-slate-50 rounded-2xl text-center border border-slate-100">
-                      <div className="w-12 h-12 rounded-2xl bg-slate-200 text-slate-400 flex items-center justify-center mx-auto mb-3">
-                        <UserCheck className="w-6 h-6" />
-                      </div>
                       <h3 className="text-base font-bold text-brand-navy mb-1">No Compatible Donors Available</h3>
                       <p className="text-xs text-slate-500 max-w-md mx-auto leading-relaxed">
-                        No active donors currently match blood group <strong className="text-brand-navy">{request.bloodGroup}</strong> with active availability and eligible status.
+                        No active donors currently match blood group <strong className="text-brand-navy">{request.bloodGroup}</strong> with active availability.
                       </p>
                     </div>
                   ) : (
                     <div className="space-y-4">
-                      <div className="flex items-center justify-between text-xs text-slate-500 px-1">
-                        <span>Found <strong className="text-brand-navy">{matchData.totalMatchesCount}</strong> compatible donor candidates</span>
-                        <span>Ranked by Match Score</span>
-                      </div>
-
                       {matchData.matches.map((matchItem, idx) => (
                         <DonorMatchCard key={matchItem.donorId} match={matchItem} rank={idx + 1} />
                       ))}
                     </div>
                   )}
                 </Card>
-              ) : (
-                /* Clean Message for FULFILLED or CANCELLED Requests */
+              )}
+
+              {/* FULFILLED OR CANCELLED NOTICE CARD */}
+              {(isFulfilled || isCancelled) && (
                 <Card variant="default" className="p-8 border border-slate-200 bg-slate-50 text-center">
                   <div className="w-12 h-12 rounded-2xl bg-slate-200 text-slate-600 flex items-center justify-center mx-auto mb-3">
                     <Info className="w-6 h-6" />
                   </div>
                   <h3 className="text-base font-bold text-brand-navy mb-1">
-                    {request.status === 'CANCELLED' ? 'Request Cancelled' : 'Request Fulfilled'}
+                    {isCancelled ? 'Request Cancelled' : 'Request Fully Fulfilled & Closed'}
                   </h3>
                   <p className="text-xs text-slate-600 max-w-md mx-auto leading-relaxed">
-                    {request.status === 'CANCELLED'
-                      ? 'Donor matching is unavailable because this request has been cancelled.'
-                      : 'Donor matching is no longer required because this request has been fulfilled.'}
+                    {isCancelled
+                      ? 'Donor matching and fulfillment actions are disabled because this request was cancelled.'
+                      : 'Donor matching is no longer required because all required blood units have been received.'}
                   </p>
-                </Card>
-              )}
-
-              {/* Fulfillment Management Section */}
-              {request.status !== 'CANCELLED' && (
-                <Card variant="elevated" className="p-6 border border-slate-200">
-                  <h3 className="text-base font-bold text-brand-navy mb-2 flex items-center gap-2">
-                    <CheckCircle2 className="w-5 h-5 text-emerald-600" />
-                    <span>Fulfillment Status Management</span>
-                  </h3>
-                  <p className="text-xs text-slate-500 mb-6">
-                    Update units received to manage fulfillment state transitions ({request.unitsFulfilled} / {request.unitsRequired} units fulfilled).
-                  </p>
-
-                  <div className="flex flex-col sm:flex-row items-center gap-4 max-w-md">
-                    <div className="w-full sm:w-48">
-                      <label className="block text-[11px] font-bold text-slate-500 mb-1">
-                        Units Fulfilled (0 – {request.unitsRequired})
-                      </label>
-                      <input
-                        type="number"
-                        min="0"
-                        max={request.unitsRequired}
-                        value={unitsInput}
-                        onChange={(e) => setUnitsInput(Number(e.target.value))}
-                        className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-bold text-brand-navy focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                      />
-                    </div>
-
-                    <Button
-                      variant="primary"
-                      size="md"
-                      onClick={handleUpdateFulfillment}
-                      disabled={isUpdating}
-                      className="w-full sm:w-auto mt-4 sm:mt-0"
-                    >
-                      {isUpdating ? 'Updating...' : 'Update Fulfillment'}
-                    </Button>
-                  </div>
                 </Card>
               )}
             </div>
           )}
         </Container>
       </main>
+
+      <RecordFulfillmentModal
+        isOpen={isFulfillmentModalOpen}
+        onClose={() => setIsFulfillmentModalOpen(false)}
+        request={request}
+        acceptedDonors={acceptedDonors}
+        onSuccess={handleConfirmFulfillment}
+      />
 
       <Footer />
     </div>
