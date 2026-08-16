@@ -5,6 +5,7 @@ import RequestTrendsChart from './RequestTrendsChart';
 import FulfillmentDonutChart from './FulfillmentDonutChart';
 import HospitalActivityTable from './HospitalActivityTable';
 import AnimatedCounter from '../../common/AnimatedCounter';
+import FloatingStatCluster from '../../common/FloatingStatCluster';
 import { motion, useReducedMotion } from 'framer-motion';
 import {
   Users,
@@ -137,148 +138,53 @@ export default function AdminAnalyticsSection({ onNavigateTab }) {
         </div>
       )}
 
-      {/* ROW 2: Four Equal Metric Cards Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 items-stretch">
-        {/* KPI 1: Total Users */}
-        <div className="bg-white/90 backdrop-blur-md rounded-3xl border border-slate-200/80 p-6 shadow-sm hover:shadow-md hover:border-slate-300 hover:-translate-y-0.5 transition-all duration-300 flex flex-col justify-between h-full group">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-extrabold text-slate-500 uppercase tracking-wider">
-              Total Users
-            </span>
-            <div className="w-10 h-10 rounded-2xl bg-pink-50 text-pink-600 flex items-center justify-center font-bold group-hover:scale-105 transition-transform">
-              <Users className="w-5 h-5" />
-            </div>
-          </div>
-          <div>
-            <span className="text-3xl font-black font-mono text-brand-navy tracking-tight">
-              <AnimatedCounter value={overview.totalUsers || 0} />
-            </span>
-          </div>
-          <div className="mt-3 pt-3 border-t border-slate-100 flex items-center justify-between text-[11px] font-bold text-emerald-600">
-            <span className="flex items-center gap-1">
-              <ArrowUpRight className="w-3.5 h-3.5" />
-              <span>{donorStats.availableDonors || 0} Available Donors</span>
-            </span>
-            {/* Animated Sparkline Visual */}
-            <svg className="w-16 h-5 text-emerald-500 overflow-visible" viewBox="0 0 60 20">
-              <motion.path
-                d="M0 15 Q15 5 30 12 T60 3"
-                stroke="currentColor"
-                strokeWidth="2"
-                fill="none"
-                initial={shouldReduceMotion ? false : { pathLength: 0 }}
-                animate={{ pathLength: 1 }}
-                transition={{ duration: 1.2, ease: [0.25, 1, 0.5, 1] }}
-              />
-            </svg>
-          </div>
-        </div>
-
-        {/* KPI 2: Total Hospitals */}
-        <div className="bg-white/90 backdrop-blur-md rounded-3xl border border-slate-200/80 p-6 shadow-sm hover:shadow-md hover:border-slate-300 hover:-translate-y-0.5 transition-all duration-300 flex flex-col justify-between h-full group">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-extrabold text-slate-500 uppercase tracking-wider">
-              Total Hospitals
-            </span>
-            <div className="w-10 h-10 rounded-2xl bg-purple-50 text-purple-600 flex items-center justify-center font-bold group-hover:scale-105 transition-transform">
-              <Building2 className="w-5 h-5" />
-            </div>
-          </div>
-          <div>
-            <span className="text-3xl font-black font-mono text-brand-navy tracking-tight">
-              <AnimatedCounter value={overview.totalHospitals || 0} />
-            </span>
-          </div>
-          <div className="mt-3 pt-3 border-t border-slate-100 flex items-center justify-between text-[11px] font-bold text-purple-600">
-            <span className="flex items-center gap-1">
-              <ArrowUpRight className="w-3.5 h-3.5" />
-              <span>{overview.verifiedHospitals || 0} Verified</span>
-            </span>
-            {/* Animated Sparkline Visual */}
-            <svg className="w-16 h-5 text-purple-500 overflow-visible" viewBox="0 0 60 20">
-              <motion.path
-                d="M0 12 Q15 18 30 8 T60 4"
-                stroke="currentColor"
-                strokeWidth="2"
-                fill="none"
-                initial={shouldReduceMotion ? false : { pathLength: 0 }}
-                animate={{ pathLength: 1 }}
-                transition={{ duration: 1.2, ease: [0.25, 1, 0.5, 1] }}
-              />
-            </svg>
-          </div>
-        </div>
-
-        {/* KPI 3: Blood Requests */}
-        <div className="bg-white/90 backdrop-blur-md rounded-3xl border border-slate-200/80 p-6 shadow-sm hover:shadow-md hover:border-slate-300 hover:-translate-y-0.5 transition-all duration-300 flex flex-col justify-between h-full group">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-extrabold text-slate-500 uppercase tracking-wider">
-              Blood Requests
-            </span>
-            <div className="w-10 h-10 rounded-2xl bg-rose-50 text-brand-red flex items-center justify-center font-bold group-hover:scale-105 transition-transform">
-              <HeartPulse className="w-5 h-5" />
-            </div>
-          </div>
-          <div>
-            <span className="text-3xl font-black font-mono text-brand-navy tracking-tight">
-              <AnimatedCounter value={fulfillment.unitsRequested || overview.totalRequests || 0} />
-            </span>
-          </div>
-          <div className="mt-3 pt-3 border-t border-slate-100 flex items-center justify-between text-[11px] font-bold text-brand-red">
-            <span className="flex items-center gap-1">
-              <Activity className="w-3.5 h-3.5" />
-              <span>{fulfillment.statusCounts?.OPEN || 0} Open Active</span>
-            </span>
-            {/* Animated Sparkline Visual */}
-            <svg className="w-16 h-5 text-brand-red overflow-visible" viewBox="0 0 60 20">
-              <motion.path
-                d="M0 16 Q15 2 30 14 T60 5"
-                stroke="currentColor"
-                strokeWidth="2"
-                fill="none"
-                initial={shouldReduceMotion ? false : { pathLength: 0 }}
-                animate={{ pathLength: 1 }}
-                transition={{ duration: 1.2, ease: [0.25, 1, 0.5, 1] }}
-              />
-            </svg>
-          </div>
-        </div>
-
-        {/* KPI 4: Total Donations / Fulfilled Units */}
-        <div className="bg-white/90 backdrop-blur-md rounded-3xl border border-slate-200/80 p-6 shadow-sm hover:shadow-md hover:border-slate-300 hover:-translate-y-0.5 transition-all duration-300 flex flex-col justify-between h-full group">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-extrabold text-slate-500 uppercase tracking-wider">
-              Fulfilled Units
-            </span>
-            <div className="w-10 h-10 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold group-hover:scale-105 transition-transform">
-              <Droplet className="w-5 h-5" />
-            </div>
-          </div>
-          <div>
-            <span className="text-3xl font-black font-mono text-brand-navy tracking-tight">
-              <AnimatedCounter value={fulfillment.unitsFulfilled || 0} />
-            </span>
-          </div>
-          <div className="mt-3 pt-3 border-t border-slate-100 flex items-center justify-between text-[11px] font-bold text-emerald-600">
-            <span className="flex items-center gap-1">
-              <TrendingUp className="w-3.5 h-3.5" />
-              <span><AnimatedCounter value={fulfillment.overallFulfillmentRate || 0} />% Success</span>
-            </span>
-            {/* Animated Sparkline Visual */}
-            <svg className="w-16 h-5 text-emerald-500 overflow-visible" viewBox="0 0 60 20">
-              <motion.path
-                d="M0 14 Q15 4 30 10 T60 2"
-                stroke="currentColor"
-                strokeWidth="2"
-                fill="none"
-                initial={shouldReduceMotion ? false : { pathLength: 0 }}
-                animate={{ pathLength: 1 }}
-                transition={{ duration: 1.2, ease: [0.25, 1, 0.5, 1] }}
-              />
-            </svg>
-          </div>
-        </div>
-      </div>
+      {/* ROW 2: Floating Statistic Cards */}
+      <FloatingStatCluster cards={[
+        {
+          id: 'total_hospitals',
+          label: 'TOTAL HOSPITALS',
+          value: overview.totalHospitals || 0,
+          subtext: `${overview.verifiedHospitals || 0} Verified`,
+          icon: Building2,
+          iconColor: 'text-purple-600',
+          backplateBg: 'bg-purple-200',
+          desktopClasses: 'lg:z-10 lg:-rotate-2 lg:-translate-y-2',
+          isFocal: false,
+        },
+        {
+          id: 'total_users',
+          label: 'TOTAL USERS',
+          value: overview.totalUsers || 0,
+          subtext: `${donorStats.availableDonors || 0} Donors`,
+          icon: Users,
+          iconColor: 'text-brand-red',
+          backplateBg: 'bg-rose-200',
+          desktopClasses: 'lg:z-30 lg:rotate-1 lg:scale-105',
+          isFocal: true,
+        },
+        {
+          id: 'blood_requests',
+          label: 'BLOOD REQUESTS',
+          value: fulfillment.unitsRequested || overview.totalRequests || 0,
+          subtext: `${fulfillment.statusCounts?.OPEN || 0} Active`,
+          icon: HeartPulse,
+          iconColor: 'text-brand-navy',
+          backplateBg: 'bg-blue-200',
+          desktopClasses: 'lg:z-20 lg:rotate-2 lg:-translate-y-1',
+          isFocal: false,
+        },
+        {
+          id: 'fulfilled_units',
+          label: 'FULFILLED UNITS',
+          value: fulfillment.unitsFulfilled || 0,
+          subtext: `${fulfillment.overallFulfillmentRate || 0}% Success`,
+          icon: Droplet,
+          iconColor: 'text-emerald-600',
+          backplateBg: 'bg-emerald-200',
+          desktopClasses: 'lg:z-10 lg:-rotate-2 lg:translate-y-2',
+          isFocal: false,
+        },
+      ]} />
 
       {/* ROW 3: Balanced 3-Column Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-stretch">

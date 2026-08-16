@@ -21,6 +21,7 @@
     "@react-three/drei": "^9.105.6",
     "@react-three/fiber": "^8.16.6",
     "@tanstack/react-router": "^1.34.0",
+    "animejs": "^3.2.2",
     "clsx": "^2.1.1",
     "framer-motion": "^11.2.10",
     "gsap": "^3.12.5",

@@ -16,7 +16,7 @@ export default function DonorHeader({
   const name = user?.name || 'Verified Donor';
 
   return (
-    <header className="bg-white/80 backdrop-blur-md border border-slate-200/80 rounded-3xl p-4 shadow-xs mb-6 select-none">
+    <header className="bg-white/80 backdrop-blur-md border border-slate-200/80 rounded-3xl p-4 shadow-xs mb-6 select-none relative z-[60]">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         {/* Left Side: Mobile Hamburger & Donor Identity */}
         <div className="flex items-center gap-3">

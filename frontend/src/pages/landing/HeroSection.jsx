@@ -4,6 +4,8 @@ import { Button } from '../../components/Button';
 import HeroVisual from '../../components/hero/HeroVisual';
 import { HeartPulse, ShieldCheck, PhoneCall, Sparkles } from 'lucide-react';
 import { motion } from 'framer-motion';
+import AnimeTextReveal from '../../components/animations/AnimeTextReveal';
+import AnimeParticles from '../../components/animations/AnimeParticles';
 
 export default function HeroSection() {
   return (
@@ -11,6 +13,9 @@ export default function HeroSection() {
       {/* Radial Glow & Subtle Depth Background */}
       <div className="absolute top-0 right-1/4 w-96 h-96 bg-brand-red/10 rounded-full blur-[120px] pointer-events-none" />
       <div className="absolute bottom-0 left-10 w-80 h-80 bg-blue-600/10 rounded-full blur-[100px] pointer-events-none" />
+      
+      {/* Anime.js Floating Particles */}
+      <AnimeParticles count={50} />
 
       {/* Signature Crimson Light Sweep — Runs ONCE during initial reveal */}
       <motion.div
@@ -36,9 +41,9 @@ export default function HeroSection() {
             </div>
 
             {/* Main Headline */}
-            <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight text-white leading-[1.15] mb-6">
-              Donate Blood, <br />
-              <span className="text-brand-red font-black">Save Lives.</span>
+            <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight text-white leading-[1.15] mb-6 flex flex-col items-start gap-1">
+              <AnimeTextReveal text="Donate Blood," />
+              <AnimeTextReveal text="Save Lives." className="text-brand-red font-black" />
             </h1>
 
             {/* Subtitle */}

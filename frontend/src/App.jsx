@@ -28,6 +28,9 @@ import AdminProfilePage from './pages/admin/AdminProfilePage';
 import { ProtectedRoute } from './routes/ProtectedRoute';
 
 import Lenis from 'lenis';
+import { AnimatePresence } from 'framer-motion';
+import PageTransition from './animations/PageTransition';
+import LifePulseCinematic from './animations/intro/LifePulseCinematic';
 
 export default function App() {
   const path = window.location.pathname;
@@ -168,7 +171,14 @@ export default function App() {
 
   return (
     <AuthProvider>
-      <NotificationProvider>{renderRoute()}</NotificationProvider>
+        <NotificationProvider>
+          <LifePulseCinematic />
+          <AnimatePresence mode="wait">
+            <PageTransition key={path}>
+              {renderRoute()}
+            </PageTransition>
+          </AnimatePresence>
+        </NotificationProvider>
     </AuthProvider>
   );
 }

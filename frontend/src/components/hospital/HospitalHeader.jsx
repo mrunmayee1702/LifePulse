@@ -28,7 +28,7 @@ export default function HospitalHeader({
   };
 
   return (
-    <header className="bg-white/90 backdrop-blur-md border-b border-slate-200/80 sticky top-0 z-40 shadow-xs select-none">
+    <header className="bg-white/90 backdrop-blur-md border-b border-slate-200/80 sticky top-0 z-[60] shadow-xs select-none">
       <div className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 py-3 flex items-center justify-between gap-4">
         {/* Left Side: Logo & Hospital Identity */}
         <div className="flex items-center gap-4">

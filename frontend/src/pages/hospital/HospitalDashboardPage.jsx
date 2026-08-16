@@ -6,12 +6,8 @@ import { hospitalService } from '../../services/hospitalService';
 import HospitalHeader from '../../components/hospital/HospitalHeader';
 import HospitalSidebar from '../../components/hospital/HospitalSidebar';
 import HospitalOverviewStrip from '../../components/hospital/HospitalOverviewStrip';
-import LiveDonorNetworkMap from '../../components/hospital/LiveDonorNetworkMap';
-import NearbyDonorsPanel from '../../components/hospital/NearbyDonorsPanel';
 import CriticalRequestsPanel from '../../components/hospital/CriticalRequestsPanel';
-import BloodInventorySnapshot from '../../components/hospital/BloodInventorySnapshot';
-import HospitalQuickActions from '../../components/hospital/HospitalQuickActions';
-import HospitalRecentActivity from '../../components/hospital/HospitalRecentActivity';
+import SmartDonorMatchesPanel from '../../components/hospital/SmartDonorMatchesPanel';
 
 import SoftBlushWaveBackground from '../../components/donor/SoftBlushWaveBackground';
 import Footer from '../../components/Footer';
@@ -26,7 +22,9 @@ export default function HospitalDashboardPage() {
   const [profileData, setProfileData] = useState(null);
   const [stats, setStats] = useState(null);
   const [requests, setRequests] = useState([]);
+  const [matches, setMatches] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isMatchesLoading, setIsMatchesLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
   const fetchData = useCallback(async () => {
@@ -49,9 +47,30 @@ export default function HospitalDashboardPage() {
         setStats(profileRes.data.stats);
       }
 
+      let fetchedRequests = [];
       if (requestsRes && requestsRes.success) {
-        setRequests(requestsRes.data.requests || []);
+        fetchedRequests = requestsRes.data.requests || [];
+        setRequests(fetchedRequests);
       }
+
+      // Fetch matches for the most urgent request
+      const urgentList = fetchedRequests.filter(r => r.status === 'OPEN' || r.status === 'PARTIALLY_FULFILLED');
+      let topUrgent = urgentList.find(r => r.urgency === 'CRITICAL');
+      if (!topUrgent) topUrgent = urgentList.find(r => r.urgency === 'URGENT');
+      if (!topUrgent && urgentList.length > 0) topUrgent = urgentList[0];
+
+      if (topUrgent) {
+        setIsMatchesLoading(true);
+        hospitalService.getBloodRequestMatches(topUrgent._id)
+          .then(matchRes => {
+            if (matchRes && matchRes.success) {
+              setMatches(matchRes.data.matches || []);
+            }
+          })
+          .catch(err => console.error('Failed to load matches for dashboard', err))
+          .finally(() => setIsMatchesLoading(false));
+      }
+
     } catch (err) {
       console.error('[Hospital Dashboard Load Error]:', err);
       setErrorMsg(err.message || 'Failed to load hospital command center.');
@@ -63,6 +82,8 @@ export default function HospitalDashboardPage() {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  const activeEmergenciesCount = requests.filter(r => (r.urgency === 'CRITICAL' || r.urgency === 'URGENT') && (r.status === 'OPEN' || r.status === 'PARTIALLY_FULFILLED')).length;
 
   const containerVariants = {
     hidden: { opacity: 0 },
@@ -84,8 +105,10 @@ export default function HospitalDashboardPage() {
     },
   };
 
+  const hospitalName = profileData?.hospitalName || user?.name || 'Hospital';
+
   return (
-    <div className="min-h-screen text-brand-navy flex flex-col justify-between antialiased relative select-none overflow-x-hidden">
+    <div className="min-h-screen text-brand-navy flex flex-col justify-between antialiased relative select-none overflow-x-hidden bg-[#FAFBFC]">
       {/* Soft Blush Wave Background */}
       <SoftBlushWaveBackground />
 
@@ -103,13 +126,15 @@ export default function HospitalDashboardPage() {
         initial="hidden"
         animate="visible"
         variants={containerVariants}
-        className="flex flex-1 p-4 sm:p-6 lg:p-8 gap-6 max-w-[1600px] mx-auto w-full relative z-10"
+        className="flex flex-1 p-4 sm:p-6 lg:p-8 gap-6 lg:gap-10 max-w-[1600px] mx-auto w-full relative z-10"
       >
         {/* Desktop Left Sidebar */}
-        <motion.div variants={itemVariants} className="hidden lg:block shrink-0">
+        <motion.div variants={itemVariants} className="hidden lg:block shrink-0 w-64">
           <HospitalSidebar
             activeRoute="/hospital/dashboard"
-            requestCount={requests.length}
+            requestCount={requests.filter(r => r.status === 'OPEN' || r.status === 'PARTIALLY_FULFILLED').length}
+            activeEmergenciesCount={activeEmergenciesCount}
+            className="sticky top-8"
           />
         </motion.div>
 
@@ -133,9 +158,10 @@ export default function HospitalDashboardPage() {
               >
                 <HospitalSidebar
                   activeRoute="/hospital/dashboard"
-                  requestCount={requests.length}
+                  requestCount={requests.filter(r => r.status === 'OPEN' || r.status === 'PARTIALLY_FULFILLED').length}
+                  activeEmergenciesCount={activeEmergenciesCount}
                   onCloseMobile={() => setIsSidebarOpen(false)}
-                  className="h-full shadow-2xl"
+                  className="h-full shadow-2xl w-64"
                 />
               </motion.div>
             </>
@@ -143,7 +169,7 @@ export default function HospitalDashboardPage() {
         </AnimatePresence>
 
         {/* Right Main Operational Workspace */}
-        <div className="flex-1 space-y-6 overflow-hidden min-w-0">
+        <div className="flex-1 space-y-8 overflow-hidden min-w-0">
           {isLoading ? (
             <div className="py-24 flex flex-col items-center justify-center gap-3 text-brand-navy bg-white/80 backdrop-blur-md rounded-3xl border border-slate-200/80">
               <RefreshCw className="w-8 h-8 text-brand-red animate-spin" />
@@ -180,56 +206,44 @@ export default function HospitalDashboardPage() {
                 </motion.div>
               )}
 
-              {/* 1. TOP KPI ROW (5 Equal Cards) */}
+              {/* Header Intro */}
+              <motion.div variants={itemVariants} className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <h1 className="text-2xl font-black text-brand-navy tracking-tight">
+                    Good evening, {hospitalName} 👋
+                  </h1>
+                  <p className="text-sm font-medium text-slate-500 mt-1">
+                    Here's what's happening with your blood network today.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-white border border-emerald-100 shadow-sm shrink-0">
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]"></span>
+                  <span className="text-xs font-black text-emerald-700 tracking-wide uppercase">Active</span>
+                </div>
+              </motion.div>
+
+              {/* TOP KPI ROW (4 Specific Cards) */}
               <motion.div variants={itemVariants}>
-                <HospitalOverviewStrip stats={stats} requests={requests} />
+                <HospitalOverviewStrip requests={requests} />
               </motion.div>
 
-              {/* 2 & 3. MAIN HERO ROW (Map 8 cols + Nearby Donors 4 cols) */}
-              <motion.div variants={itemVariants} className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-                {/* LIVE DONOR NETWORK MAP (8 COLS) */}
-                <div className="lg:col-span-8">
-                  <LiveDonorNetworkMap
-                    donors={[]}
-                    onSelectDonor={() => { window.location.href = '/hospital/requests'; }}
+              {/* MAIN CONTENT ROW: Critical Requests + Smart Donor Matches */}
+              <motion.div variants={itemVariants} className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-stretch h-full">
+                
+                {/* LEFT: CRITICAL REQUESTS */}
+                <div className="h-[500px]">
+                  <CriticalRequestsPanel requests={requests} />
+                </div>
+
+                {/* RIGHT: SMART DONOR MATCHES */}
+                <div className="h-[500px]">
+                  <SmartDonorMatchesPanel 
+                    matches={matches} 
+                    isLoading={isMatchesLoading} 
+                    onMatchClick={(match) => window.location.href = '/hospital/requests'}
                   />
                 </div>
 
-                {/* NEARBY DONORS PANEL (4 COLS) */}
-                <div className="lg:col-span-4">
-                  <NearbyDonorsPanel
-                    donors={[]}
-                    onViewAll={() => { window.location.href = '/hospital/requests'; }}
-                  />
-                </div>
-              </motion.div>
-
-              {/* 4-COLUMN LOWER OPERATIONS ROW (EQUAL HEIGHT h-[308px] & PERFECT ALIGNMENT) */}
-              <motion.div variants={itemVariants} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-5 items-stretch">
-                {/* 1. CRITICAL REQUESTS (4 COLS = ~33%) */}
-                <div className="lg:col-span-4" id="requests">
-                  <CriticalRequestsPanel
-                    requests={requests}
-                    onViewAll={() => { window.location.href = '/hospital/requests'; }}
-                  />
-                </div>
-
-                {/* 2. BLOOD INVENTORY SNAPSHOT (3 COLS = ~25%) */}
-                <div className="lg:col-span-3" id="inventory">
-                  <BloodInventorySnapshot />
-                </div>
-
-                {/* 3. QUICK ACTIONS (2 COLS = ~17%) */}
-                <div className="lg:col-span-2">
-                  <HospitalQuickActions isVerified={profileData ? profileData.isVerified : true} />
-                </div>
-
-                {/* 4. RECENT ACTIVITY (3 COLS = ~25%) */}
-                <div className="lg:col-span-3" id="activity">
-                  <HospitalRecentActivity
-                    onViewAll={() => { window.location.href = '/hospital/requests'; }}
-                  />
-                </div>
               </motion.div>
             </>
           )}

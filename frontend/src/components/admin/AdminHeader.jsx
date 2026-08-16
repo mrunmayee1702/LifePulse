@@ -12,7 +12,7 @@ export default function AdminHeader({ user, onLogout, onToggleSidebar, searchPla
   });
 
   return (
-    <header className="bg-white border-b border-slate-200/80 sticky top-0 z-40 shadow-sm select-none">
+    <header className="bg-white border-b border-slate-200/80 sticky top-0 z-[60] shadow-sm select-none">
       <div className="px-4 sm:px-6 h-16 flex items-center justify-between gap-4">
         {/* Left Side: Sidebar Toggle & Quick Search */}
         <div className="flex items-center gap-3 flex-1 max-w-md">
