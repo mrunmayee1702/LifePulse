@@ -73,10 +73,15 @@ app.use((err, req, res, next) => {
 
 // Start Server
 if (process.env.NODE_ENV !== 'test') {
-  connectDB();
-  server.listen(PORT, () => {
-    console.log(`[LifePulse Backend] Server running on http://localhost:${PORT}`);
-  });
+  connectDB()
+    .then(() => {
+      server.listen(PORT, () => {
+        console.log(`[LifePulse Backend] Server running on http://localhost:${PORT}`);
+      });
+    })
+    .catch((err) => {
+      console.error('[LifePulse Backend Startup Error]: Failed to connect to MongoDB Atlas.', err);
+    });
 }
 
 module.exports = app;

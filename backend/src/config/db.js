@@ -5,11 +5,14 @@ const connectDB = async () => {
 
   try {
     const conn = await mongoose.connect(mongoUri, {
-      serverSelectionTimeoutMS: 2500,
+      serverSelectionTimeoutMS: 15000,
+      connectTimeoutMS: 15000,
     });
     console.log(`[LifePulse MongoDB] Connected: ${conn.connection.host}`);
+    return conn;
   } catch (error) {
-    console.warn(`[LifePulse MongoDB Notice]: Database connection deferred or offline (${error.message}). Set MONGODB_URI in backend/.env to connect your database instance.`);
+    console.error(`[LifePulse MongoDB Error]: Database connection failed (${error.message}).`);
+    throw error;
   }
 };
 

@@ -10,14 +10,47 @@ import { motion, AnimatePresence } from 'framer-motion';
 export default function Navbar() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
+  const [hoveredLink, setHoveredLink] = useState(null);
+  const [activeLink, setActiveLink] = useState('/#hero');
   const { user, isAuthenticated, logout } = useAuth();
 
   useEffect(() => {
     const handleScroll = () => {
       setScrolled(window.scrollY > 20);
+
+      // Active section scroll detection
+      const sections = NAV_LINKS.map(link => {
+        const hash = link.href.includes('#') ? link.href.substring(link.href.indexOf('#')) : '';
+        if (hash === '#hero' || !hash) return { href: link.href, element: document.querySelector('#hero') || document.body };
+        return { href: link.href, element: document.querySelector(hash) };
+      }).filter(s => s.element);
+
+      const scrollPosition = window.scrollY + 200;
+      for (let i = sections.length - 1; i >= 0; i--) {
+        const { href, element } = sections[i];
+        if (element && element.offsetTop <= scrollPosition) {
+          setActiveLink(href);
+          break;
+        }
+      }
     };
+
+    const handleLocationChange = () => {
+      const path = window.location.pathname;
+      const hash = window.location.hash;
+      setActiveLink(hash ? `/${hash}` : (path === '/' ? '/#hero' : path));
+    };
+
+    handleLocationChange();
     window.addEventListener('scroll', handleScroll);
-    return () => window.removeEventListener('scroll', handleScroll);
+    window.addEventListener('hashchange', handleLocationChange);
+    window.addEventListener('popstate', handleLocationChange);
+
+    return () => {
+      window.removeEventListener('scroll', handleScroll);
+      window.removeEventListener('hashchange', handleLocationChange);
+      window.removeEventListener('popstate', handleLocationChange);
+    };
   }, []);
 
   const getPortalPath = () => {
@@ -35,6 +68,7 @@ export default function Navbar() {
 
     if (isHomePage && targetHash) {
       e.preventDefault();
+      setActiveLink(href);
       if (targetHash === '#hero') {
         window.scrollTo({ top: 0, behavior: 'smooth' });
         window.history.pushState(null, '', '/');
@@ -54,7 +88,7 @@ export default function Navbar() {
   };
 
   return (
-    <header className={`sticky top-0 z-50 transition-all duration-300 ${scrolled ? 'bg-white/95 backdrop-blur-md shadow-md py-3' : 'bg-white py-4 border-b border-slate-100'}`}>
+    <header className={`sticky top-0 z-50 transition-all duration-300 ${scrolled ? 'bg-white/95 backdrop-blur-md shadow-md py-2.5' : 'bg-white py-3 border-b border-slate-100'}`}>
       <Container size="lg">
         <nav className="flex items-center justify-between" aria-label="Main Navigation">
           {/* Logo */}
@@ -62,18 +96,45 @@ export default function Navbar() {
             <LifePulseLogo size="md" />
           </a>
 
-          {/* Desktop Nav Links */}
-          <div className="hidden lg:flex items-center gap-8">
-            {NAV_LINKS.map((link) => (
-              <a
-                key={link.name}
-                href={link.href}
-                onClick={(e) => handleNavClick(e, link.href)}
-                className="text-sm font-semibold text-brand-navy hover:text-brand-red transition-colors duration-200 cursor-pointer"
-              >
-                {link.name}
-              </a>
-            ))}
+          {/* Desktop Nav Links with Bhavesh's Sliding Pill Active Indicator */}
+          <div className="hidden lg:flex items-center gap-1 bg-slate-100/70 p-1.5 rounded-full border border-slate-200/60 backdrop-blur-md">
+            {NAV_LINKS.map((link) => {
+              const isActive = activeLink === link.href;
+              const isHovered = hoveredLink === link.href;
+
+              return (
+                <a
+                  key={link.name}
+                  href={link.href}
+                  onClick={(e) => handleNavClick(e, link.href)}
+                  onMouseEnter={() => setHoveredLink(link.href)}
+                  onMouseLeave={() => setHoveredLink(null)}
+                  className="relative px-4 py-1.5 text-xs font-bold transition-colors duration-200 cursor-pointer rounded-full select-none"
+                >
+                  {/* Sliding Active Pill Background */}
+                  {isActive && (
+                    <motion.div
+                      layoutId="navbar-active-pill"
+                      transition={{ type: 'spring', stiffness: 380, damping: 30 }}
+                      className="absolute inset-0 bg-white rounded-full shadow-xs border border-slate-200/80"
+                    />
+                  )}
+
+                  {/* Hover Pill Background */}
+                  {isHovered && !isActive && (
+                    <motion.div
+                      layoutId="navbar-hover-pill"
+                      transition={{ type: 'spring', stiffness: 400, damping: 35 }}
+                      className="absolute inset-0 bg-white/60 rounded-full"
+                    />
+                  )}
+
+                  <span className={`relative z-10 transition-colors ${isActive ? 'text-brand-red font-black' : 'text-brand-navy hover:text-brand-red'}`}>
+                    {link.name}
+                  </span>
+                </a>
+              );
+            })}
           </div>
 
           {/* Right Action CTAs */}
@@ -145,19 +206,22 @@ export default function Navbar() {
           >
             <Container className="py-6 flex flex-col gap-4">
               <div className="flex flex-col gap-3">
-                {NAV_LINKS.map((link) => (
-                  <a
-                    key={link.name}
-                    href={link.href}
-                    onClick={(e) => {
-                      setMobileMenuOpen(false);
-                      handleNavClick(e, link.href);
-                    }}
-                    className="text-base font-semibold text-brand-navy hover:text-brand-red px-3 py-2 rounded-lg hover:bg-slate-50 transition-colors cursor-pointer"
-                  >
-                    {link.name}
-                  </a>
-                ))}
+                {NAV_LINKS.map((link) => {
+                  const isActive = activeLink === link.href;
+                  return (
+                    <a
+                      key={link.name}
+                      href={link.href}
+                      onClick={(e) => {
+                        setMobileMenuOpen(false);
+                        handleNavClick(e, link.href);
+                      }}
+                      className={`text-base font-semibold px-3 py-2 rounded-lg transition-colors cursor-pointer ${isActive ? 'bg-rose-50 text-brand-red font-bold' : 'text-brand-navy hover:bg-slate-50'}`}
+                    >
+                      {link.name}
+                    </a>
+                  );
+                })}
               </div>
 
               <div className="pt-4 border-t border-slate-100 flex flex-col gap-2.5">
